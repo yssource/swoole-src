@@ -1,4 +1,4 @@
-name: test-ubuntu
+name: test-alpine
 
 on: [push, pull_request]
 
