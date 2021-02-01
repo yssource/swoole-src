@@ -11,7 +11,8 @@ if [ ${PHP_VERSION_ID} -lt 70500 ]; then
 else
     export PHP_VERSION="rc"
 fi
-if [ "${TRAVIS_BRANCH}" = "alpine" ]; then
+
+if [ "${TEST_PLATFORM}" = "alpine" ]; then
     export PHP_VERSION="${PHP_VERSION}-alpine"
 fi
 
