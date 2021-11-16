@@ -33,6 +33,7 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 #include <openssl/rand.h>
+#include <openssl/opensslv.h>
 
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 #define SW_SUPPORT_DTLS
@@ -40,6 +41,15 @@
 
 #if defined(LIBRESSL_VERSION_NUMBER) && LIBRESSL_VERSION_NUMBER < 0x3000000fL
 #undef SW_SUPPORT_DTLS
+#endif
+
+#ifdef OPENSSL_IS_BORINGSSL
+#define BIO_CTRL_DGRAM_SET_CONNECTED 32
+#define BIO_CTRL_DGRAM_SET_PEER 44
+#define BIO_CTRL_DGRAM_SET_NEXT_TIMEOUT 45
+#define BIO_dgram_get_peer(b,peer) \
+         (int)BIO_ctrl(b, BIO_CTRL_DGRAM_GET_PEER, 0, (char *)(peer))
+#define OPENSSL_assert(x)       assert(x)
 #endif
 
 enum swSSLCreateFlag {
@@ -112,6 +122,11 @@ struct SSLContext {
     uchar disable_tls_host_name : 1;
     std::string tls_host_name;
 #endif
+
+#ifdef OPENSSL_IS_BORINGSSL
+    uint8_t grease;
+#endif
+
     std::string cafile;
     std::string capath;
     uint8_t verify_depth;
@@ -169,5 +184,6 @@ void swoole_ssl_server_http_advise(swoole::SSLContext &);
 const char *swoole_ssl_get_error();
 int swoole_ssl_get_ex_connection_index();
 int swoole_ssl_get_ex_port_index();
+std::string swoole_ssl_get_version_message();
 
 #endif

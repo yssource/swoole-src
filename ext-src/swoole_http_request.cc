@@ -192,7 +192,7 @@ static PHP_METHOD(swoole_http_request, create);
 static PHP_METHOD(swoole_http_request, parse);
 static PHP_METHOD(swoole_http_request, isCompleted);
 static PHP_METHOD(swoole_http_request, getMethod);
-static PHP_METHOD(swoole_http_request, rawContent);
+static PHP_METHOD(swoole_http_request, getContent);
 static PHP_METHOD(swoole_http_request, __destruct);
 SW_EXTERN_C_END
 
@@ -210,8 +210,8 @@ ZEND_END_ARG_INFO()
 
 const zend_function_entry swoole_http_request_methods[] =
 {
-    PHP_ME(swoole_http_request, rawContent, arginfo_swoole_http_void, ZEND_ACC_PUBLIC)
-    PHP_MALIAS(swoole_http_request, getContent, rawContent, arginfo_swoole_http_void, ZEND_ACC_PUBLIC)
+    PHP_ME(swoole_http_request, getContent, arginfo_swoole_http_void, ZEND_ACC_PUBLIC)
+    PHP_MALIAS(swoole_http_request, rawContent, getContent, arginfo_swoole_http_void, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_http_request, getData, arginfo_swoole_http_void, ZEND_ACC_PUBLIC)
     PHP_ME(swoole_http_request, create, arginfo_swoole_http_create, ZEND_ACC_PUBLIC | ZEND_ACC_STATIC)
     PHP_ME(swoole_http_request, parse, arginfo_swoole_http_parse, ZEND_ACC_PUBLIC)
@@ -276,7 +276,7 @@ bool HttpContext::parse_form_data(const char *boundary_str, int boundary_len) {
     return true;
 }
 
-void swoole_http_parse_cookie(zval *zarray, const char *at, size_t length) {
+void swoole_http_parse_cookie(zval *zarray, const char *at, size_t length, bool url_decode) {
     char keybuf[SW_HTTP_COOKIE_KEYLEN];
     char valbuf[SW_HTTP_COOKIE_VALLEN];
     char *_c = (char *) at;
@@ -354,7 +354,9 @@ void swoole_http_parse_cookie(zval *zarray, const char *at, size_t length) {
         memcpy(valbuf, (char *) at + j, vlen);
         valbuf[vlen] = 0;
         _value = http_trim_double_quote(valbuf, &vlen);
-        vlen = php_url_decode(_value, vlen);
+        if (url_decode) {
+            vlen = php_url_decode(_value, vlen);
+        }
         if (klen > 1) {
             add_assoc_stringl_ex(zarray, keybuf, klen - 1, _value, vlen);
         }
@@ -518,7 +520,7 @@ static int multipart_body_on_header_value(multipart_parser *p, const char *at, s
 
         zval tmp_array;
         array_init(&tmp_array);
-        swoole_http_parse_cookie(&tmp_array, at + sizeof("form-data;") - 1, length - sizeof("form-data;") + 1);
+        swoole_http_parse_cookie(&tmp_array, at + sizeof("form-data;") - 1, length - sizeof("form-data;") + 1, false);
 
         zval *zform_name;
         if (!(zform_name = zend_hash_str_find(Z_ARRVAL(tmp_array), ZEND_STRL("name")))) {
@@ -760,13 +762,11 @@ static int http_request_on_body(swoole_http_parser *parser, const char *at, size
         ctx->request.body_length += length;
     }
 
-    if (!ctx->recv_chunked && ctx->parse_body && ctx->request.post_form_urlencoded) {
-        sapi_module.treat_data(
-            PARSE_STRING,
-            estrndup(at, length),  // do not free, it will be freed by treat_data
-            swoole_http_init_and_read_property(
-                swoole_http_request_ce, ctx->request.zobject, &ctx->request.zpost, ZEND_STRL("post")));
-    } else if (ctx->mt_parser != nullptr) {
+    if (ctx->request.body_at == nullptr) {
+        ctx->request.body_at = at;
+    }
+
+    if (ctx->mt_parser != nullptr) {
         multipart_parser *multipart_parser = ctx->mt_parser;
         if (is_beginning) {
             /* Compatibility: some clients may send extra EOL */
@@ -796,6 +796,12 @@ static int http_request_message_complete(swoole_http_parser *parser) {
         sapi_module.treat_data(
             PARSE_STRING,
             estrndup(ctx->request.chunked_body->str, content_length),  // do not free, it will be freed by treat_data
+            swoole_http_init_and_read_property(
+                swoole_http_request_ce, ctx->request.zobject, &ctx->request.zpost, ZEND_STRL("post")));
+    } else if (!ctx->recv_chunked && ctx->parse_body && ctx->request.post_form_urlencoded && ctx->request.body_at) {
+        sapi_module.treat_data(
+            PARSE_STRING,
+            estrndup(ctx->request.body_at, ctx->request.body_length),  // do not free, it will be freed by treat_data
             swoole_http_init_and_read_property(
                 swoole_http_request_ce, ctx->request.zobject, &ctx->request.zpost, ZEND_STRL("post")));
     }
@@ -846,7 +852,7 @@ const char *HttpContext::get_content_encoding() {
 }
 #endif
 
-static PHP_METHOD(swoole_http_request, rawContent) {
+static PHP_METHOD(swoole_http_request, getContent) {
     HttpContext *ctx = php_swoole_http_request_get_and_check_context(ZEND_THIS);
     if (UNEXPECTED(!ctx)) {
         RETURN_FALSE;

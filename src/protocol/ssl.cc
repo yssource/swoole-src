@@ -18,6 +18,7 @@
 #include "swoole_string.h"
 #include "swoole_socket.h"
 #include "swoole_ssl.h"
+#include "swoole_util.h"
 
 #ifdef SW_USE_OPENSSL
 
@@ -53,6 +54,14 @@ static int swoole_ssl_verify_cookie(SSL *ssl, const uchar *cookie, uint cookie_l
 #else
 #define MAYBE_UNUSED
 #endif
+
+std::string swoole_ssl_get_version_message() {
+    std::string message = swoole::std_string::format(
+        "OPENSSL_VERSION: %s\n",
+        OPENSSL_VERSION_TEXT);
+
+    return message;
+}
 
 static void MAYBE_UNUSED swoole_ssl_lock_callback(int mode, int type, const char *file, int line);
 
@@ -459,8 +468,10 @@ bool SSLContext::create() {
 
 #ifdef SW_SUPPORT_DTLS
     if (protocols & SW_SSL_DTLS) {
+#ifndef OPENSSL_IS_BORINGSSL
         SSL_CTX_set_cookie_generate_cb(context, swoole_ssl_generate_cookie);
         SSL_CTX_set_cookie_verify_cb(context, swoole_ssl_verify_cookie);
+#endif        
     }
 #endif
 
@@ -493,6 +504,10 @@ bool SSLContext::create() {
         SSL_CTX_set_session_cache_mode(context, SSL_SESS_CACHE_SERVER);
         SSL_CTX_sess_set_cache_size(context, 1);
     }
+#endif
+
+#ifdef OPENSSL_IS_BORINGSSL
+    SSL_CTX_set_grease_enabled(context, grease);
 #endif
 
     if (!client_cert_file.empty() && !set_client_certificate()) {

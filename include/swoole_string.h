@@ -202,6 +202,10 @@ class String {
         return append(append_str.c_str(), append_str.length());
     }
 
+    inline int append(char c) {
+        return append(&c, sizeof(c));
+    }
+
     inline int append(const String &append_str) {
         size_t new_size = length + append_str.length;
         if (new_size > size) {
@@ -243,7 +247,7 @@ class String {
 
     ssize_t split(const char *delimiter, size_t delimiter_length, const StringExplodeHandler &handler);
     int append_random_bytes(size_t length, bool base64 = false);
-    void print();
+    void print(bool print_value = true);
 
     template <typename... Args>
     inline size_t format(const char *format, Args... args) {

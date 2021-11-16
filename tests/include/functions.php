@@ -629,7 +629,7 @@ function swoole_fork_exec(callable $fn, bool $redirect_stdin_and_stdout = false,
     return $process::wait();
 }
 
-function fork_exec(callable $fn, $f_stdout = "/dev/null", $f_stderr = null)
+function php_fork_exec(callable $fn, $f_stdout = "/dev/null", $f_stderr = null)
 {
     $pid = pcntl_fork();
     if ($pid < 0) {
@@ -646,6 +646,7 @@ function fork_exec(callable $fn, $f_stdout = "/dev/null", $f_stderr = null)
         exit;
     }
     pcntl_waitpid($pid, $status);
+    return ['pid' => $pid, 'status', $status];
 }
 
 /**
@@ -798,4 +799,24 @@ function swoole_get_variance($avg, $array, $is_swatch = false)
 function swoole_get_average($array)
 {
     return array_sum($array) / count($array);
+}
+
+function assert_server_stats($stats) {
+    Assert::keyExists($stats, 'connection_num');
+    Assert::keyExists($stats, 'request_count');
+}
+
+function swoole_loop_n($n, $fn)
+{
+    for ($i = 0; $i < $n; $i++) {
+        $fn($i);
+    }
+}
+
+function swoole_loop($fn)
+{
+    $i = 0;
+    while (true) {
+        $fn($i++);
+    }
 }

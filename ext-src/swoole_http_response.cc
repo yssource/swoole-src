@@ -395,7 +395,7 @@ static void http_build_header(HttpContext *ctx, String *response, size_t body_le
         int type;
         zval *zvalue;
 
-        auto add_header = [](swoole::String *response, const char *key, size_t l_key, zval *value) {
+        auto add_header = [](String *response, const char *key, size_t l_key, zval *value) {
             if (ZVAL_IS_NULL(value)) {
                 return;
             }
@@ -704,6 +704,14 @@ static PHP_METHOD(swoole_http_response, end) {
     Z_PARAM_ZVAL_EX(zdata, 1, 0)
     ZEND_PARSE_PARAMETERS_END_EX(RETURN_FALSE);
 
+    if (ctx->onAfterResponse) {
+        ctx->onAfterResponse(ctx);
+    }
+
+    if (swoole_isset_hook((enum swGlobalHookType) PHP_SWOOLE_HOOK_AFTER_RESPONSE)) {
+        swoole_call_hook((enum swGlobalHookType) PHP_SWOOLE_HOOK_AFTER_RESPONSE, ctx);
+    }
+
 #ifdef SW_USE_HTTP2
     if (ctx->http2) {
         ctx->http2_end(zdata, return_value);
@@ -784,20 +792,13 @@ void HttpContext::end(zval *zdata, zval *return_value) {
                 send_body_str = http_body.str;
                 send_body_len = http_body.length;
             }
-            /**
-             *
-             */
-#ifdef SW_HTTP_SEND_TWICE
-            if (send_body_len < SwooleG.pagesize)
-#endif
-            {
+            // send twice to reduce memory copy
+            if (send_body_len < SwooleG.pagesize) {
                 if (http_buffer->append(send_body_str, send_body_len) < 0) {
                     send_header_ = 0;
                     RETURN_FALSE;
                 }
-            }
-#ifdef SW_HTTP_SEND_TWICE
-            else {
+            } else {
                 if (!send(this, http_buffer->str, http_buffer->length)) {
                     send_header_ = 0;
                     RETURN_FALSE;
@@ -809,7 +810,6 @@ void HttpContext::end(zval *zdata, zval *return_value) {
                 }
                 goto _skip_copy;
             }
-#endif
         }
 
         if (!send(this, http_buffer->str, http_buffer->length)) {
@@ -819,9 +819,7 @@ void HttpContext::end(zval *zdata, zval *return_value) {
         }
     }
 
-#ifdef SW_HTTP_SEND_TWICE
 _skip_copy:
-#endif
     if (upgrade && !co_socket) {
         Server *serv = (Server *) private_data;
         Connection *conn = serv->get_connection_verify(fd);
@@ -919,6 +917,13 @@ static PHP_METHOD(swoole_http_response, sendfile) {
     }
     if (length == 0) {
         length = file_stat.st_size - offset;
+    }
+
+    if (ctx->onAfterResponse) {
+        ctx->onAfterResponse(ctx);
+    }
+    if (swoole_isset_hook((enum swGlobalHookType) PHP_SWOOLE_HOOK_AFTER_RESPONSE)) {
+        swoole_call_hook((enum swGlobalHookType) PHP_SWOOLE_HOOK_AFTER_RESPONSE, ctx);
     }
 
 #ifdef SW_USE_HTTP2
@@ -1355,6 +1360,7 @@ static PHP_METHOD(swoole_http_response, create) {
             ctx->parser.data = ctx;
             swoole_http_parser_init(&ctx->parser, PHP_HTTP_REQUEST);
         } else {
+            delete ctx;
             assert(0);
             RETURN_FALSE;
         }

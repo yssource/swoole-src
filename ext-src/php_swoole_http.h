@@ -19,6 +19,9 @@
 #pragma once
 
 #include "swoole_http.h"
+#ifdef SW_USE_HTTP2
+#include "swoole_http2.h"
+#endif
 #include "thirdparty/swoole_http_parser.h"
 #include "thirdparty/multipart_parser.h"
 
@@ -74,6 +77,7 @@ struct Request {
     uint8_t post_form_urlencoded;
 
     zval zdata;
+    const char *body_at;
     size_t body_length;
     String *chunked_body;
 #ifdef SW_USE_HTTP2
@@ -169,9 +173,12 @@ struct Context {
     std::string upload_tmp_dir;
 
     void *private_data;
+    void *private_data_2;
     bool (*send)(Context *ctx, const char *data, size_t length);
     bool (*sendfile)(Context *ctx, const char *file, uint32_t l_file, off_t offset, size_t length);
     bool (*close)(Context *ctx);
+    bool (*onBeforeRequest)(Context *ctx);
+    void (*onAfterResponse)(Context *ctx);
 
     void init(Server *server);
     void init(coroutine::Socket *socket);
@@ -208,8 +215,8 @@ class Stream {
     // uint8_t priority; // useless now
     uint32_t id;
     // flow control
-    uint32_t send_window;
-    uint32_t recv_window;
+    uint32_t remote_window_size;
+    uint32_t local_window_size;
     Coroutine *waiting_coroutine = nullptr;
 
     Stream(Session *client, uint32_t _id);
@@ -230,11 +237,9 @@ class Session {
     nghttp2_hd_inflater *inflater = nullptr;
     nghttp2_hd_deflater *deflater = nullptr;
 
-    uint32_t header_table_size;
-    uint32_t send_window;
-    uint32_t recv_window;
-    uint32_t max_concurrent_streams;
-    uint32_t max_frame_size;
+    http2::Settings local_settings = {};
+    http2::Settings remote_settings = {};
+
     uint32_t last_stream_id;
     bool shutting_down;
     bool is_coro;
@@ -295,7 +300,7 @@ static inline bool swoole_http_has_crlf(const char *value, size_t length) {
     return false;
 }
 
-void swoole_http_parse_cookie(zval *array, const char *at, size_t length);
+void swoole_http_parse_cookie(zval *array, const char *at, size_t length, bool url_decode = true);
 
 swoole::http::Context *php_swoole_http_request_get_context(zval *zobject);
 void php_swoole_http_request_set_context(zval *zobject, swoole::http::Context *context);
@@ -364,7 +369,7 @@ class HeaderSet {
             nv->valuelen = value_len;
             nv->flags = flags | NGHTTP2_NV_FLAG_NO_COPY_NAME | NGHTTP2_NV_FLAG_NO_COPY_VALUE;
             swoole_trace_log(SW_TRACE_HTTP2,
-                             "name=(%zu)[%.*s], value=(%zu)[%.*s]",
+                             "name=(%zu)[" SW_ECHO_LEN_BLUE "], value=(%zu)[" SW_ECHO_LEN_CYAN "]",
                              name_len,
                              (int) name_len,
                              name,
